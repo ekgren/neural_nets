@@ -7,7 +7,7 @@ def sign_comp(x):
     if abs(x) < 1.:
         return 1.
     else:
-        return 0.1
+        return 0.5
 
 dS = np.vectorize(sign_comp)
 
@@ -22,12 +22,9 @@ class NeuralNet:
     learning_rate : string, optional
         The learning rate schedule:
         constant: eta = eta0 [default]
-        optimal: eta = 1.0 / (t + t0) [not implemented]
-        where t0 is chosen by a heuristic proposed by Leon Bottou.
 
     eta0 : double
-        The initial learning rate for the 'constant' or 'invscaling'
-        schedules. The default value is 0.5.
+        The initial learning rate for the 'constant'. The default value is 0.5.
 
     """
 
@@ -37,6 +34,13 @@ class NeuralNet:
         self.layer_data = []
         self.layers_added = 0
         self.weights = []
+
+        def sign_comp(x):
+            if abs(x) < 1.:
+                return 1.
+            else:
+                return 0.5
+        self.sign_comp_vectorized = np.vectorize(sign_comp)
 
     def add_layer(self, layer_type, n_features, bias=True, f=None):
         if layer_type != 'Input':
@@ -51,120 +55,95 @@ class NeuralNet:
     def init_weights(self, out_dim, in_dim):
         return np.random.random((out_dim, in_dim))*2-1
 
-    def transfer_func(self, h, f='step'):
+    def transfer_func(self, v, f='tanh'):
         if f == 'tanh':
-            return np.tanh(h)
+            return np.tanh(v)
         elif f == 'step':
-            return np.sign(h)
+            return np.sign(v)
         elif f == 'linear':
-            return h
+            return v
 
-    def transfer_func_deriv(self, h, f='step'):
-        pass
+    def transfer_func_deriv(self, v, f='tanh'):
+        if f == 'tanh':
+            return 1. - np.power(np.tanh(v), 2)
+        elif f == 'step':
+            return self.sign_comp_vectorized(v)
+        elif f == 'linear':
+            return 1
 
+    def error_function(self, v):
+        return 0.5*np.sum(np.power(v, 2))
+
+    def forward_pass(self, x):
+        '''
+
+        :param x:
+        :return:
+        '''
+        activations = []
+        zs = []
+
+        for i, layer in enumerate(self.layer_data):
+            if layer.type == 'Input':
+                if layer.bias:
+                    x = np.append(1., x)
+                activations.append(x)
+                z = self.weights[i].dot(x.T)
+                zs.append(z)
+
+            elif layer.type == 'Hidden':
+                a = self.transfer_func(z, layer.f)
+                if layer.bias:
+                    a = np.append(1., z)
+                activations.append(a)
+                z = self.weights[i].dot(a)
+                zs.append(z)
+
+            elif layer.type == 'Output':
+                a = self.transfer_func(z, layer.f)
+                activations.append(a)
+
+        return activations, zs
 
     def SGD_fit(self, X, Y, n_iter=1):
 
         for n in range(n_iter):
 
-            E_mean = 0.
+            J_mean = 0.
 
             #TODO: Randomize order of x from X
             for x, y in zip(X, Y):
 
-                hs = []
-                zs = []
+                activations, zs = self.forward_pass(x)
+                J = self.error_function(y - activations[-1])
+                J_mean += J
 
-                #Forward pass
-                for i, layer in enumerate(self.layer_data):
-                    if layer.type == 'Input':
-                        if layer.bias:
-                            new_x = np.append(x, 1.)
-                        h = self.weights[i].dot(new_x.T)
-                        hs.append(h)
-
-                    elif layer.type == 'Hidden':
-                        z = self.transfer_func(h, layer.f)
-                        if layer.bias:
-                            z = np.append(z, 1.)
-                        zs.append(z)
-                        h = self.weights[i].dot(z)
-                        hs.append(h)
-
-
-                    elif layer.type == 'Output':
-                        o = self.transfer_func(h, layer.f)
-                        zs.append(o)
-
-                '''
-                v = 10000
-                dim = 100
-
-                eta = 0.01
-
-                w = np.zeros((1, v))
-                w[:, 0] = 1
-
-                W1 = np.random.random((v, dim))/dim
-                W2 = np.random.random((dim, v))/dim
-
-                x = w.copy()
-                target = np.zeros((1, v))
-                target[:, 5] = 1
-
-                for iteration in xrange(1000):
-                    h1 = np.dot(x, W1)
-                    z1 = np.tanh(h)
-
-                    h2 = np.dot(z1, W2)
-                    o = np.tanh(h2)
-
-                    df = 1. - np.power(h1, 2)
-                    dg = 1. - np.power(h2, 2)
-
-                    E = 0.5*np.power(np.linalg.norm(target - y), 2)
-                    dE = o - target
-
-                    do = dE*dg
-                    dh = df*np.dot(do, W2.T)
-
-                    #dW2 = np.outer(hidden, do)
-                    dW2 = np.outer(df, do)
-                    dW1 = np.outer(x, dh)
-
-                    W2 = W2 - eta*dW2
-                    W1 = W1 - eta*dW1
-
-                    if (iteration+1)%10 == 0:
-                        print "Iteration:", iteration + 1
-                        print "Error:", E
-                '''
-
-                for i, (h, z) in enumerate(zip(hs[::-1], zs[::-1])):
+                ds = []
+                #Backward pass
+                for i, (a, z) in enumerate(zip(activations[::-1], zs[::-1])):
                     if i == 0:
-                        E = 0.5*np.sum(np.power(y - z, 2))
-                        E_mean += E
+                        d = a-y
+                    else:
+                        d = np.dot(self.weights[-i].T, d)*dS(z)
+                    ds.append(d)
 
-                        dE = z - y
-                        df = dS(h)
-                        do = dE*df
+                ds = ds[::-1]
+                for i, w in enumerate(self.weights):
+                    self.weights[i] = self.weights[i] + np.outer(ds[i], a[i])
 
-                    elif i == 1:
-
-                        dW = np.outer(do, dS(z))
-                        self.weights[-i] = self.weights[-i] - self.eta0*dW
-
-            E_mean = E_mean/X.shape[0]
-            print E_mean
+            J_mean = J_mean/X.shape[0]
+            print J_mean
 
 if __name__=='__main__':
 
-    X = np.random.random((1, 100))*2-1
-    y = np.random.random((1, 2))*2-1
+    X = np.random.random((1, 10))*2.-1.
+    Y = np.zeros((1, 3))
+    Y[0] = 1.
 
-    NN = NeuralNet(eta0=0.000001)
-    NN.add_layer(layer_type='Input', n_features=100, bias=True, f=None)
-    NN.add_layer(layer_type='Hidden', n_features=50, bias=True, f='step')
-    NN.add_layer(layer_type='Output', n_features=2, bias=False, f='step')
+    NN = NeuralNet(eta0=0.0001)
+    NN.add_layer(layer_type='Input', n_features=X.shape[1], bias=False, f=None)
+    NN.add_layer(layer_type='Hidden', n_features=150, bias=False, f='step')
+    NN.add_layer(layer_type='Hidden', n_features=50, bias=False, f='step')
+    NN.add_layer(layer_type='Output', n_features=3, bias=False, f='step')
 
-    responses = NN.SGD_fit(X, y, n_iter=10)
+    responses = NN.SGD_fit(X, Y, n_iter=10)
