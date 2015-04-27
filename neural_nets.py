@@ -135,14 +135,17 @@ class NeuralNet:
 
         return deltas
 
+    # TODO: Add Batch gradient decent
+
     def SGD_fit(self, X, Y, n_iter=1):
 
         for n in range(n_iter):
 
             J_mean = 0.
 
-            # TODO: Randomize order of x from X
-            for x, y in zip(X, Y):
+            shuffle = np.arange(X.shape[0])
+            np.random.shuffle(shuffle)
+            for x, y in zip(X[shuffle], Y[shuffle]):
                 activations, zs = self.forward_pass(x)
 
                 J = self.error_function(y - activations[-1])
