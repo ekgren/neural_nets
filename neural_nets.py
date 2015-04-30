@@ -136,6 +136,7 @@ class NeuralNet:
         return deltas
 
     # TODO: Add Batch gradient decent
+    # TODO: Add Mini-Batch SGD
 
     def SGD_fit(self, X, Y, n_iter=1):
 
